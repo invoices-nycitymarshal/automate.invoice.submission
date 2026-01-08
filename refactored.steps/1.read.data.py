@@ -2,7 +2,6 @@ import os
 import re
 
 def parse_filename(filename: str) -> tuple[str, int]:
-    print()
 
     base_name = os.path.basename(filename)
 
@@ -11,12 +10,11 @@ def parse_filename(filename: str) -> tuple[str, int]:
     match = re.match(pattern, base_name)
     if not match:
         raise ValueError(
-            f"Invalid filename format: '{base_name}'."
-            "Expected format: 'ABC 12345.pdf"
+            f"Invalid filename format: '{base_name}'. "
+            "Expected format: 'ABC 12345.pdf'"
         )
     
     client_id = match.group(1)
     invoice_id = int(match.group(2))
 
     return client_id, invoice_id
-
