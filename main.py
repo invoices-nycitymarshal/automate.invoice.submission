@@ -6,3 +6,4 @@ from pathlib import Path
 
 def iterate_pdfs(input_dir: str | Path) -> list[Path]:
         print("Hello, World!")
+
