@@ -5,7 +5,7 @@ def parse_filename(filename: str) -> tuple[str, int]:
 
     base_name = os.path.basename(filename)
 
-    pattern = r'^([A-Z]{3}) (\d{5}).pdf$'
+    pattern = r'^([A-Z]{3}) (\d{5})\.pdf$'
 
     match = re.match(pattern, base_name)
     if not match:
