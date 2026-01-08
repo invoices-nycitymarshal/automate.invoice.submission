@@ -12,3 +12,5 @@ def parse_filename(filename: str) -> tuple[str, int]:
     print()
 
     base_name = os.path.basename(filename)
+
+    pattern = r'^([A-Z]{3}) (\d{5}).pdf$'
