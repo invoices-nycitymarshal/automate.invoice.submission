@@ -28,3 +28,11 @@ def build_email_msg(
     msg["From"] = sender_email
     msg["Subject"] = write_subject(invoice_num)
     msg.set_content(write_body())
+
+    pdf_bytes = pdf_path.read_bytes()
+    msg.add_attachment(
+        pdf_bytes,
+        maintype = "application",
+        subtype = "pdf",
+        filename = pdf_path.name,
+    )
