@@ -38,7 +38,11 @@ def build_email_msg(
     )
 
 def save_eml_draft(
-        
-
+        msg: EmailMessage,
+        drafts_dir: Path,
+        filename_stem: str,
 ) -> Path:
-        print()
+        drafts_dir.mkdir(parents = True, exist_ok = True)
+        eml_path = drafts_dir ##
+        eml_path.write_bytes(msg.as_bytes())
+        return eml_path
