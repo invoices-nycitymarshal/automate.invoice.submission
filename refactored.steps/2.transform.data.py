@@ -36,3 +36,9 @@ def build_email_msg(
         subtype = "pdf",
         filename = pdf_path.name,
     )
+
+def save_eml_draft(
+        
+
+) -> Path:
+        print()
