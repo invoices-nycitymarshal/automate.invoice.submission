@@ -1,10 +1,3 @@
-## ABC 12345.pdf
-## │││ ││││││
-## │││ └─ 5-digit invoice ID (int)
-## └└└── 3-letter client ID (str)  
-
-## goals: regex enforcement, directory safe traversing
-
 import os
 import re
 
