@@ -2,15 +2,22 @@ from __future__ import annotations
 
 import csv
 import re
+import sys
 from dataclasses import dataclass
 from pathlib import Path
 from typing import Optional
 
 import fitz
+import pandas as pd
+import pytesseract
+from PIL import Image
 
 
-INVOICE_RE = re.compile(r"INVOICE\s*#\s*:\s*([0-9]+)", re.IGNORECASE)
-PAGE_RE = re.compile(r"PAGE\s*:\s*([0-9]+)", re.IGNORECASE)
+# Set this if pytesseract cannot find tesseract automatically
+pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
+
+INVOICE_RE = re.compile(r"INVOICE\s*#\s*:?\s*([0-9]+)", re.IGNORECASE)
+PAGE_RE = re.compile(r"PAGE\s*:?\s*([0-9]+)", re.IGNORECASE)
 
 
 @dataclass
@@ -18,6 +25,7 @@ class PageRecord:
     absolute_page: int
     invoice_number: str
     invoice_page: Optional[int]
+    source: str  # "text" or "ocr"
 
 
 @dataclass
@@ -32,6 +40,8 @@ class InvoiceRange:
 
 
 def extract_invoice_and_page(text: str) -> tuple[str, Optional[int]]:
+    text = text.replace("\u00a0", " ")
+
     invoice_match = INVOICE_RE.search(text)
     page_match = PAGE_RE.search(text)
 
@@ -43,23 +53,67 @@ def extract_invoice_and_page(text: str) -> tuple[str, Optional[int]]:
     return invoice_number, invoice_page
 
 
-def parse_pdf_pages(pdf_path: str | Path) -> list[PageRecord]:
-    pdf_path = Path(pdf_path)
+def page_to_ocr_text(page: fitz.Page, dpi: int = 300) -> str:
+    pix = page.get_pixmap(dpi=dpi, alpha=False)
+    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    return pytesseract.image_to_string(img)
+
+
+def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
+    if not pdf_path.exists():
+        raise FileNotFoundError(f"PDF not found: {pdf_path}")
+
     doc = fitz.open(pdf_path)
     records: list[PageRecord] = []
 
-    for i in range(doc.page_count):
-        text = doc.load_page(i).get_text("text") or ""
-        text = text.replace("\u00a0", " ")
+    try:
+        for i in range(doc.page_count):
+            page = doc.load_page(i)
 
-        invoice_number, invoice_page = extract_invoice_and_page(text)
-        records.append(PageRecord(i + 1, invoice_number, invoice_page))
+            # Try normal text extraction first
+            text = page.get_text("text") or ""
 
-    doc.close()
+            try:
+                invoice_number, invoice_page = extract_invoice_and_page(text)
+                records.append(
+                    PageRecord(
+                        absolute_page=i + 1,
+                        invoice_number=invoice_number,
+                        invoice_page=invoice_page,
+                        source="text",
+                    )
+                )
+                continue
+            except ValueError:
+                pass
+
+            # Fall back to OCR
+            ocr_text = page_to_ocr_text(page)
+
+            try:
+                invoice_number, invoice_page = extract_invoice_and_page(ocr_text)
+                records.append(
+                    PageRecord(
+                        absolute_page=i + 1,
+                        invoice_number=invoice_number,
+                        invoice_page=invoice_page,
+                        source="ocr",
+                    )
+                )
+            except ValueError:
+                preview = ocr_text[:500].replace("\n", " ")
+                raise ValueError(
+                    f"Could not find 'INVOICE #' on absolute page {i + 1}, "
+                    f"even after OCR.\nOCR preview: {preview}"
+                )
+
+    finally:
+        doc.close()
+
     return records
 
 
-def group_into_invoice_ranges(records: list[PageRecord]) -> list[InvoiceRange]:
+def group_invoice_ranges(records: list[PageRecord]) -> list[InvoiceRange]:
     if not records:
         return []
 
@@ -70,66 +124,97 @@ def group_into_invoice_ranges(records: list[PageRecord]) -> list[InvoiceRange]:
 
     for record in records[1:]:
         if record.invoice_number != current_invoice:
-            ranges.append(InvoiceRange(current_invoice, start_page, prev_page))
+            ranges.append(
+                InvoiceRange(
+                    invoice_number=current_invoice,
+                    absolute_start_page=start_page,
+                    absolute_end_page=prev_page,
+                )
+            )
             current_invoice = record.invoice_number
             start_page = record.absolute_page
+
         prev_page = record.absolute_page
 
-    ranges.append(InvoiceRange(current_invoice, start_page, prev_page))
+    ranges.append(
+        InvoiceRange(
+            invoice_number=current_invoice,
+            absolute_start_page=start_page,
+            absolute_end_page=prev_page,
+        )
+    )
+
     return ranges
 
 
-def write_csv(ranges: list[InvoiceRange], csv_path: str | Path) -> None:
-    csv_path = Path(csv_path)
-    with csv_path.open("w", newline="", encoding="utf-8") as f:
+def write_csv(ranges: list[InvoiceRange], csv_path: Path) -> None:
+    df = pd.DataFrame(
+        [
+            {
+                "invoice_number": r.invoice_number,
+                "absolute_start_page": r.absolute_start_page,
+                "absolute_end_page": r.absolute_end_page,
+                "page_count": r.page_count,
+            }
+            for r in ranges
+        ]
+    )
+    df.to_csv(csv_path, index=False)
+
+
+def write_debug_csv(records: list[PageRecord], debug_csv_path: Path) -> None:
+    with debug_csv_path.open("w", newline="", encoding="utf-8") as f:
         writer = csv.writer(f)
-        writer.writerow([
-            "invoice_number",
-            "absolute_start_page",
-            "absolute_end_page",
-            "page_count",
-        ])
-        for r in ranges:
-            writer.writerow([
-                r.invoice_number,
-                r.absolute_start_page,
-                r.absolute_end_page,
-                r.page_count,
-            ])
+        writer.writerow(["absolute_page", "invoice_number", "invoice_page", "source"])
+        for r in records:
+            writer.writerow([r.absolute_page, r.invoice_number, r.invoice_page, r.source])
 
 
-def split_pdf(master_pdf_path: str | Path, ranges: list[InvoiceRange], output_dir: str | Path) -> None:
-    output_dir = Path(output_dir)
+def split_pdf(master_pdf_path: Path, ranges: list[InvoiceRange], output_dir: Path) -> None:
     output_dir.mkdir(parents=True, exist_ok=True)
 
     src = fitz.open(master_pdf_path)
-
-    for r in ranges:
-        new_doc = fitz.open()
-        new_doc.insert_pdf(
-            src,
-            from_page=r.absolute_start_page - 1,
-            to_page=r.absolute_end_page - 1,
-        )
-        out_path = output_dir / f"invoice_{r.invoice_number}.pdf"
-        new_doc.save(out_path)
-        new_doc.close()
-
-    src.close()
+    try:
+        for r in ranges:
+            new_doc = fitz.open()
+            try:
+                new_doc.insert_pdf(
+                    src,
+                    from_page=r.absolute_start_page - 1,
+                    to_page=r.absolute_end_page - 1,
+                )
+                out_path = output_dir / f"invoice_{r.invoice_number}.pdf"
+                new_doc.save(out_path)
+                print(f"Created: {out_path.name}")
+            finally:
+                new_doc.close()
+    finally:
+        src.close()
 
 
 def main() -> None:
-    master_pdf = "master.pdf"
-    output_csv = "invoice_ranges.csv"
-    output_dir = "split_invoices"
+    if len(sys.argv) < 2:
+        print("Usage: python split_invoices.py <master.pdf>")
+        sys.exit(1)
 
+    master_pdf = Path(sys.argv[1]).resolve()
+    base_dir = master_pdf.parent
+    output_dir = base_dir / "split_invoices"
+    csv_path = base_dir / "invoice_ranges.csv"
+    debug_csv_path = base_dir / "invoice_page_debug.csv"
+
+    print(f"Reading: {master_pdf}")
     records = parse_pdf_pages(master_pdf)
-    ranges = group_into_invoice_ranges(records)
-    write_csv(ranges, output_csv)
+    ranges = group_invoice_ranges(records)
+
+    write_csv(ranges, csv_path)
+    write_debug_csv(records, debug_csv_path)
     split_pdf(master_pdf, ranges, output_dir)
 
-    print(f"CSV written to: {output_csv}")
-    print(f"Split PDFs written to: {output_dir}")
+    print("\nDone.")
+    print(f"Invoice table: {csv_path}")
+    print(f"Debug file: {debug_csv_path}")
+    print(f"Split PDFs folder: {output_dir}")
 
 
 if __name__ == "__main__":
