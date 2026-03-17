@@ -12,12 +12,18 @@ import pandas as pd
 import pytesseract
 from PIL import Image
 
-
-# Set this if pytesseract cannot find tesseract automatically
+# Update this path if Tesseract is installed somewhere else on your machine.
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
-INVOICE_RE = re.compile(r"INVOICE\s*#\s*:?\s*([0-9]+)", re.IGNORECASE)
-PAGE_RE = re.compile(r"PAGE\s*:?\s*([0-9]+)", re.IGNORECASE)
+# More forgiving OCR regex:
+# - handles "INVOICE #: 43707"
+# - handles OCR splits like "INVOI CE #: 43707"
+INVOICE_RE = re.compile(
+    r"INVOI\s*CE\s*#?\s*:?\s*([0-9]+)|INVOICE\s*#?\s*:?\s*([0-9]+)",
+    re.IGNORECASE,
+)
+
+PAGE_RE = re.compile(r"PAGE\s*:?[\s]*([0-9]+)", re.IGNORECASE)
 
 
 @dataclass
@@ -40,7 +46,15 @@ class InvoiceRange:
 
 
 def extract_invoice_and_page(text: str) -> tuple[str, Optional[int]]:
+    """
+    Extract only:
+    - invoice number
+    - page number
+
+    Tolerates common OCR spacing issues.
+    """
     text = text.replace("\u00a0", " ")
+    text = re.sub(r"\s+", " ", text)
 
     invoice_match = INVOICE_RE.search(text)
     page_match = PAGE_RE.search(text)
@@ -48,15 +62,30 @@ def extract_invoice_and_page(text: str) -> tuple[str, Optional[int]]:
     if not invoice_match:
         raise ValueError("Could not find 'INVOICE #' on page.")
 
-    invoice_number = invoice_match.group(1)
+    invoice_number = invoice_match.group(1) or invoice_match.group(2)
     invoice_page = int(page_match.group(1)) if page_match else None
     return invoice_number, invoice_page
 
 
 def page_to_ocr_text(page: fitz.Page, dpi: int = 300) -> str:
-    pix = page.get_pixmap(dpi=dpi, alpha=False)
+    """
+    OCR only the upper-right portion of the page, where the invoice header lives.
+    This is faster and usually more accurate than OCR'ing the whole page.
+    """
+    rect = page.rect
+
+    clip = fitz.Rect(
+        rect.width * 0.62,   # left
+        rect.height * 0.00,  # top
+        rect.width * 0.99,   # right
+        rect.height * 0.22,  # bottom
+    )
+
+    pix = page.get_pixmap(dpi=dpi, clip=clip, alpha=False)
     img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
-    return pytesseract.image_to_string(img)
+
+    # --psm 6 works well for a small structured header block
+    return pytesseract.image_to_string(img, config="--psm 6")
 
 
 def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
@@ -70,7 +99,7 @@ def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
         for i in range(doc.page_count):
             page = doc.load_page(i)
 
-            # Try normal text extraction first
+            # First try built-in text extraction
             text = page.get_text("text") or ""
 
             try:
@@ -87,7 +116,7 @@ def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
             except ValueError:
                 pass
 
-            # Fall back to OCR
+            # Fallback to OCR
             ocr_text = page_to_ocr_text(page)
 
             try:
@@ -103,8 +132,8 @@ def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
             except ValueError:
                 preview = ocr_text[:500].replace("\n", " ")
                 raise ValueError(
-                    f"Could not find 'INVOICE #' on absolute page {i + 1}, "
-                    f"even after OCR.\nOCR preview: {preview}"
+                    f"Could not find 'INVOICE #' on absolute page {i + 1}, even after OCR. "
+                    f"OCR preview: {preview}"
                 )
 
     finally:
@@ -114,6 +143,9 @@ def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
 
 
 def group_invoice_ranges(records: list[PageRecord]) -> list[InvoiceRange]:
+    """
+    Group contiguous pages by invoice number.
+    """
     if not records:
         return []
 
