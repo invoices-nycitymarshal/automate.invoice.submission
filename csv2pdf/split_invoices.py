@@ -10,19 +10,15 @@ from typing import Optional
 import fitz
 import pandas as pd
 import pytesseract
-from PIL import Image
+from PIL import Image, ImageOps, ImageFilter
 
-# Update this path if Tesseract is installed somewhere else on your machine.
+# Change this only if Tesseract is installed somewhere else
 pytesseract.pytesseract.tesseract_cmd = r"C:\Program Files\Tesseract-OCR\tesseract.exe"
 
-# More forgiving OCR regex:
-# - handles "INVOICE #: 43707"
-# - handles OCR splits like "INVOI CE #: 43707"
 INVOICE_RE = re.compile(
-    r"INVOI\s*CE\s*#?\s*:?\s*([0-9]+)|INVOICE\s*#?\s*:?\s*([0-9]+)",
+    r"INVOI\s*CE\s*#?\s*:?\s*([0-9]+)|INVOICE\s*#?\s*:?\s*([0-9]+)|CE\s*#?\s*:?\s*([0-9]{4,})",
     re.IGNORECASE,
 )
-
 PAGE_RE = re.compile(r"PAGE\s*:?[\s]*([0-9]+)", re.IGNORECASE)
 
 
@@ -31,7 +27,7 @@ class PageRecord:
     absolute_page: int
     invoice_number: str
     invoice_page: Optional[int]
-    source: str  # "text" or "ocr"
+    source: str
 
 
 @dataclass
@@ -45,16 +41,14 @@ class InvoiceRange:
         return self.absolute_end_page - self.absolute_start_page + 1
 
 
-def extract_invoice_and_page(text: str) -> tuple[str, Optional[int]]:
-    """
-    Extract only:
-    - invoice number
-    - page number
-
-    Tolerates common OCR spacing issues.
-    """
+def normalize_text(text: str) -> str:
     text = text.replace("\u00a0", " ")
-    text = re.sub(r"\s+", " ", text)
+    text = re.sub(r"\s+", " ", text).strip()
+    return text
+
+
+def extract_invoice_and_page(text: str) -> tuple[str, Optional[int]]:
+    text = normalize_text(text)
 
     invoice_match = INVOICE_RE.search(text)
     page_match = PAGE_RE.search(text)
@@ -62,30 +56,84 @@ def extract_invoice_and_page(text: str) -> tuple[str, Optional[int]]:
     if not invoice_match:
         raise ValueError("Could not find 'INVOICE #' on page.")
 
-    invoice_number = invoice_match.group(1) or invoice_match.group(2)
+    invoice_number = (
+        invoice_match.group(1)
+        or invoice_match.group(2)
+        or invoice_match.group(3)
+    )
     invoice_page = int(page_match.group(1)) if page_match else None
     return invoice_number, invoice_page
 
 
-def page_to_ocr_text(page: fitz.Page, dpi: int = 300) -> str:
-    """
-    OCR only the upper-right portion of the page, where the invoice header lives.
-    This is faster and usually more accurate than OCR'ing the whole page.
-    """
+def pil_preprocess(img: Image.Image) -> Image.Image:
+    # grayscale
+    img = img.convert("L")
+    # slightly sharpen
+    img = img.filter(ImageFilter.SHARPEN)
+    # autocontrast
+    img = ImageOps.autocontrast(img)
+
+    # simple threshold to improve OCR on scans
+    img = img.point(lambda p: 255 if p > 160 else 0)
+    return img
+
+
+def ocr_pil_image(img: Image.Image) -> str:
+    img = pil_preprocess(img)
+    return pytesseract.image_to_string(img, config="--psm 6")
+
+
+def render_clip(page: fitz.Page, clip: fitz.Rect, dpi: int = 300) -> Image.Image:
+    pix = page.get_pixmap(dpi=dpi, clip=clip, alpha=False)
+    return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+
+def render_full_page(page: fitz.Page, dpi: int = 300) -> Image.Image:
+    pix = page.get_pixmap(dpi=dpi, alpha=False)
+    return Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+
+
+def try_ocr_variants(page: fitz.Page) -> str:
     rect = page.rect
 
-    clip = fitz.Rect(
-        rect.width * 0.62,   # left
-        rect.height * 0.00,  # top
-        rect.width * 0.99,   # right
-        rect.height * 0.22,  # bottom
-    )
+    # Several progressively broader attempts
+    clips = [
+        fitz.Rect(rect.width * 0.62, rect.height * 0.00, rect.width * 0.99, rect.height * 0.22),  # tight top-right
+        fitz.Rect(rect.width * 0.52, rect.height * 0.00, rect.width * 0.99, rect.height * 0.28),  # larger top-right
+        fitz.Rect(rect.width * 0.40, rect.height * 0.00, rect.width * 0.99, rect.height * 0.35),  # much larger
+    ]
 
-    pix = page.get_pixmap(dpi=dpi, clip=clip, alpha=False)
-    img = Image.frombytes("RGB", [pix.width, pix.height], pix.samples)
+    attempts: list[tuple[str, str]] = []
 
-    # --psm 6 works well for a small structured header block
-    return pytesseract.image_to_string(img, config="--psm 6")
+    # Try cropped regions first
+    for idx, clip in enumerate(clips, start=1):
+        base_img = render_clip(page, clip, dpi=350)
+
+        for rotation in (0, 90, 270, 180):
+            img = base_img.rotate(rotation, expand=True) if rotation else base_img
+            text = ocr_pil_image(img)
+            attempts.append((f"crop{idx}_rot{rotation}", text))
+            try:
+                extract_invoice_and_page(text)
+                return text
+            except ValueError:
+                pass
+
+    # Then try full page
+    full_img = render_full_page(page, dpi=300)
+    for rotation in (0, 90, 270, 180):
+        img = full_img.rotate(rotation, expand=True) if rotation else full_img
+        text = ocr_pil_image(img)
+        attempts.append((f"full_rot{rotation}", text))
+        try:
+            extract_invoice_and_page(text)
+            return text
+        except ValueError:
+            pass
+
+    # If everything fails, return the "best" looking attempt for debugging
+    best_name, best_text = max(attempts, key=lambda x: len(normalize_text(x[1])))
+    return f"[best_attempt={best_name}] {best_text}"
 
 
 def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
@@ -99,9 +147,8 @@ def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
         for i in range(doc.page_count):
             page = doc.load_page(i)
 
-            # First try built-in text extraction
+            # 1) Try built-in text extraction
             text = page.get_text("text") or ""
-
             try:
                 invoice_number, invoice_page = extract_invoice_and_page(text)
                 records.append(
@@ -116,9 +163,8 @@ def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
             except ValueError:
                 pass
 
-            # Fallback to OCR
-            ocr_text = page_to_ocr_text(page)
-
+            # 2) OCR fallback with multiple strategies
+            ocr_text = try_ocr_variants(page)
             try:
                 invoice_number, invoice_page = extract_invoice_and_page(ocr_text)
                 records.append(
@@ -130,9 +176,9 @@ def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
                     )
                 )
             except ValueError:
-                preview = ocr_text[:500].replace("\n", " ")
+                preview = normalize_text(ocr_text)[:500]
                 raise ValueError(
-                    f"Could not find 'INVOICE #' on absolute page {i + 1}, even after OCR. "
+                    f"Could not find invoice data on absolute page {i + 1}, even after multi-pass OCR. "
                     f"OCR preview: {preview}"
                 )
 
@@ -143,9 +189,6 @@ def parse_pdf_pages(pdf_path: Path) -> list[PageRecord]:
 
 
 def group_invoice_ranges(records: list[PageRecord]) -> list[InvoiceRange]:
-    """
-    Group contiguous pages by invoice number.
-    """
     if not records:
         return []
 
