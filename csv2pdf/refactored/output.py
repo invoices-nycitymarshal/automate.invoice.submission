@@ -27,3 +27,19 @@ def write_ranges_csv(ranges: list[InvoiceRange], csv_path: Path) -> None:
         ]
     )
     df.to_csv(csv_path, index=False)
+
+def write_debug_csv(records: list[PageRecord], debug_csv_path: Path) -> None:
+    normalized_records = fill_missing_billing_codes(records)
+    with debug_csv_path.open("w", newline="", encoding="utf-8") as file:
+        writer = csv.writer(file)
+        writer.writerow(["absolute_page", "invoice_number", "invoice_page", "billing_code", "source"])
+        for record in normalized_records:
+            writer.writerow(
+                [
+                    record.absolute_page,
+                    record.invoice_number,
+                    record.invoice_page,
+                    record.billing_code,
+                    record.source,
+                ]
+            )
