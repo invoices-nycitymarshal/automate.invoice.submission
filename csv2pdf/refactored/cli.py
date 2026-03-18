@@ -26,3 +26,17 @@ def process_master_pdf(master_pdf: Path) -> dict[str, Path]:
         "master_pdf": master_pdf,
         **paths,
     }
+
+def main() -> None:
+    if len(sys.argv) < 2:
+        print("Usage: python cli.py <path_to_master_pdf>")
+        sys.exit(1)
+
+    result = process_master_pdf(Path(sys.argv[1]))
+    print("Done.")
+    print(f"Invoice Table: {result['ranges_csv']}")
+    print(f"Debug File: {result['debug_csv']}")
+    print(f"Split PDFs folder: {result['output_dir']}")
+
+if __name__ == "__main__":
+    main()
