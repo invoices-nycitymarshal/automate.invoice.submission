@@ -7,8 +7,8 @@ def add_letterhead_pdf_to_pdf(
     letterhead_pdf_path,
     output_path=None,
     width=260,
-    top_margin=18
-): 
+    top_margin=18,
+):
     pdf_path = Path(pdf_path)
     letterhead_pdf_path = Path(letterhead_pdf_path)
     output_path = Path(output_path) if output_path else pdf_path
@@ -18,7 +18,7 @@ def add_letterhead_pdf_to_pdf(
 
     if not letterhead_pdf_path.exists():
         raise FileNotFoundError(f"Letterhead PDF not found: {letterhead_pdf_path}")
-    
+
     src_doc = fitz.open(pdf_path)
     letterhead_doc = fitz.open(letterhead_pdf_path)
 
@@ -26,15 +26,15 @@ def add_letterhead_pdf_to_pdf(
         if len(letterhead_doc) == 0:
             raise ValueError("Letterhead PDF has no pages.")
 
-        lh_page = letterhead_doc[0]
-        lh_rect = lh_page.rect
+        letterhead_page = letterhead_doc[0]
+        letterhead_rect = letterhead_page.rect
 
-        lh_width = lh_rect.width
-        lh_height = lh_rect.height
+        original_width = letterhead_rect.width
+        original_height = letterhead_rect.height
 
-        scale = width / lh_width
-        scaled_height = lh_height * scale
-        
+        scale = width / original_width
+        scaled_height = original_height * scale
+
         for page in src_doc:
             page_width = page.rect.width
 
@@ -49,7 +49,7 @@ def add_letterhead_pdf_to_pdf(
                 target_rect,
                 letterhead_doc,
                 0,
-                overlay=True
+                overlay=True,
             )
 
         if output_path == pdf_path:
@@ -67,34 +67,40 @@ def add_letterhead_pdf_to_pdf(
         if not letterhead_doc.is_closed:
             letterhead_doc.close()
 
+
 def add_letterhead_pdf_to_folder(
     folder_path,
     letterhead_pdf_path,
     recursive=False,
     width=260,
-    top_margin=18
+    top_margin=18,
 ):
-    folder = Path(folder_path)
+    folder_path = Path(folder_path)
     letterhead_pdf_path = Path(letterhead_pdf_path)
 
-    if not folder.exists():
-        raise FileNotFoundError(f"Folder not found: {folder}")
+    if not folder_path.exists():
+        raise FileNotFoundError(f"Folder not found: {folder_path}")
 
-    if not folder.is_dir():
-        raise NotADirectoryError(f"Not a folder: {folder}")
+    if not folder_path.is_dir():
+        raise NotADirectoryError(f"Not a folder: {folder_path}")
 
-    pdf_paths = folder.rglob("*.pdf") if recursive else folder.glob("*.pdf")
+    pdf_paths = folder_path.rglob("*.pdf") if recursive else folder_path.glob("*.pdf")
 
-    processed = 0
+    processed_count = 0
+
     for pdf_path in pdf_paths:
+        if pdf_path.resolve() == letterhead_pdf_path.resolve():
+            continue
+
         add_letterhead_pdf_to_pdf(
             pdf_path=pdf_path,
             letterhead_pdf_path=letterhead_pdf_path,
             output_path=None,
             width=width,
-            top_margin=top_margin
+            top_margin=top_margin,
         )
-        processed += 1
+
+        processed_count += 1
         print(f"Added letterhead to: {pdf_path.name}")
 
-    print(f"Done. Processed {processed} PDF(s).")
+    print(f"Done. Processed {processed_count} PDF(s).")
