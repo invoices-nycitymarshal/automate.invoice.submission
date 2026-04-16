@@ -14,5 +14,5 @@ def read_ranges_csv(csv_path: Path, required_columns: str[str]) -> pd.DataFrame:
     validate_required_columns(df, required_columns)
     return df
 
-def filter_rows_for_master_pdf():
+def filter_rows_for_master_pdf(df: pd.DataFrame, master_pdf_name: str) -> pd.DataFrame:
     return 0
