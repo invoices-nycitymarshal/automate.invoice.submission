@@ -21,6 +21,18 @@ def split_pdf_using_rows(
 
             new_doc = fitz.open()
 
+            try:
+                new_doc.insert_pdf(
+                    src, from_page = start_page - 1,
+                    to_page = end_page - 1,
+                )
+
+                output_path = output_dir / f"{billing}_{invoice}.pdf"
+                new_doc.save(output_path)
+                print(f"Created: {output_path.name}")
+
+            finally:
+                new_doc.close()    
     finally:
         src.close()
     
