@@ -14,3 +14,5 @@ REQUIURED_COLUMNS = {
     "Absolute End Page"
 }
 
+CLEAR_OLD_OUTPUTS = False
+FILTER_BY_SOURCE_FILE = True
