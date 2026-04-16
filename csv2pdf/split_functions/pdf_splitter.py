@@ -9,4 +9,10 @@ def split_pdf_using_rows(
         rows: pd.DataFrame,
         output_dir: Path,       ) -> None:
     
-    return 0
+    src = fitz.open(master_pdf_path)
+    try:
+        return 0
+    
+    finally:
+        src.close()
+    
