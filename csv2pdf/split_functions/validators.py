@@ -11,5 +11,6 @@ def validate_required_columns(df: pd.DataFrame, required: set[str]) -> None:
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
 
-def ensure_non_empty_dataframe():
-    return 0
+def ensure_non_empty_dataframe(df: pd.DataFrame, message: str) -> None:
+    if df.empty:
+        raise ValueError(message)
