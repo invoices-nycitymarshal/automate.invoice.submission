@@ -6,7 +6,7 @@ MASTER_PDF = BASE_DIR / "master.pdf"
 RANGES_CSV = BASE_DIR / "invoice_ranges.csv"
 OUTPUT_DIR = BASE_DIR / "split_invoices"
 
-REQUIURED_COLUMNS = {
+REQUIRED_COLUMNS = {
     "Source File",
     "Billing Code",
     "Invoice Number",

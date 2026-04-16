@@ -6,7 +6,7 @@ def ensure_file_exists(path: Path, label: str) -> None:
         raise FileNotFoundError(f"{label} not found in {path}")
 
 def validate_required_columns(df: pd.DataFrame, required: set[str]) -> None:
-    missing = required - set(df.columnns)
+    missing = required - set(df.columns)
 
     if missing:
         raise ValueError(f"Missing required columns: {sorted(missing)}")
