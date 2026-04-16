@@ -8,8 +8,8 @@ from .validators    import (
 import pandas as pd
 
 
-def read_ranges_csv():
-    return 0
+def read_ranges_csv(csv_path: Path, required_columns: str[str]) -> pd.DataFrame:
+    ensure_file_exists(csv_path, "Ranges CSV")
 
 def filter_rows_for_master_pdf():
     return 0
