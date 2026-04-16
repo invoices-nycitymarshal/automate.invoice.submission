@@ -4,5 +4,9 @@ import fitz
 
 from .filename_utils import safe_filename_part, normalize_billing_code
 
-def split_pdf_using_rows():
+def split_pdf_using_rows(
+        master_pdf_path: Path,
+        rows: pd.DataFrame,
+        output_dir: Path,       ) -> None:
+    
     return 0
