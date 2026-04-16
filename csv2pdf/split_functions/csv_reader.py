@@ -10,6 +10,9 @@ import pandas as pd
 
 def read_ranges_csv(csv_path: Path, required_columns: str[str]) -> pd.DataFrame:
     ensure_file_exists(csv_path, "Ranges CSV")
+    df = pd.read_csv(csv_path)
+    validate_required_columns(df, required_columns)
+    return df
 
 def filter_rows_for_master_pdf():
     return 0
