@@ -11,8 +11,16 @@ def split_pdf_using_rows(
     
     src = fitz.open(master_pdf_path)
     try:
-        return 0
-    
+        for _, row in rows.iterrows():
+            billing = safe_filename_part(
+                normalize_billing_code(row["Billing Code"])
+            )    
+            invoice = safe_filename_part(str(row["Invoice Number"]).strip())
+            start_page = int(row["Absolute Start Page"])
+            end_page = int(row["Absolute End Page"])
+
+            new_doc = fitz.open()
+
     finally:
         src.close()
     
