@@ -15,4 +15,10 @@ def read_ranges_csv(csv_path: Path, required_columns: str[str]) -> pd.DataFrame:
     return df
 
 def filter_rows_for_master_pdf(df: pd.DataFrame, master_pdf_name: str) -> pd.DataFrame:
-    return 0
+    filtered = df[df["Source File"].astype(str).str.strip() == master_pdf_name].copy()
+    
+    ensure_non_empty_dataframe(
+        filtered,
+        f"No rows found in invoice_ranges.csv for source file '{master_pdf_name}'.",
+    )
+    return filtered
