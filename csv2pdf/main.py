@@ -1,25 +1,14 @@
+from pathlib import Path
 from split_functions.workflow import run_split_workflow
-from split_functions.add_letterhead import add_letterhead_pdf_to_folder
-from split_functions.config import (
-    OUTPUT_DIR,
-    LETTERHEAD_PDF,
-    LETTERHEAD_WIDTH,
-    LETTERHEAD_TOP_MARGIN,
-    LETTERHEAD_RECURSIVE,
-)
+from split_functions.add_letterhead import add_letterhead_to_pdf
 
+OUTPUT_DIR = Path("split_invoices")
 
 def main():
     run_split_workflow()
 
-    add_letterhead_pdf_to_folder(
-        folder_path=OUTPUT_DIR,
-        letterhead_pdf_path=LETTERHEAD_PDF,
-        recursive=LETTERHEAD_RECURSIVE,
-        width=LETTERHEAD_WIDTH,
-        top_margin=LETTERHEAD_TOP_MARGIN,
-    )
-
+    for pdf_path in OUTPUT_DIR.glob("*.pdf"):
+        add_letterhead_to_pdf(pdf_path)
 
 if __name__ == "__main__":
     main()
